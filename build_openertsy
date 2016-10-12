@@ -1,0 +1,142 @@
+#bismillah
+
+VERSION=1.7.7.2
+# for --with-http_perl_module nginx deb package requires: libpcre3, libossp-uuid-perl, libossp-uuid16
+#install dependencies and compiling tools
+apt-get update
+apt-get -y install libreadline-dev libncurses5-dev libpcre3-dev libssl-dev perl make checkinstall
+
+#download tarball and extract content
+wget http://openresty.org/download/ngx_openresty-$VERSION.tar.gz
+tar -xzf ngx_openresty-$VERSION.tar.gz
+cd ngx_openresty-$VERSION
+
+#configure and then make
+./configure \
+--sbin-path=/usr/sbin/nginx \
+--conf-path=/etc/nginx/nginx.conf \
+--error-log-path=/var/log/nginx/error.log \
+--http-client-body-temp-path=/var/lib/nginx/body \
+--http-fastcgi-temp-path=/var/lib/nginx/fastcgi \
+--http-log-path=/var/log/nginx/access.log \
+--http-proxy-temp-path=/var/lib/nginx/proxy \
+--http-scgi-temp-path=/var/lib/nginx/scgi \
+--http-uwsgi-temp-path=/var/lib/nginx/uwsgi \
+--lock-path=/var/lock/nginx.lock \
+--pid-path=/var/run/nginx.pid \
+--with-luajit \
+--with-ipv6 \
+--with-pcre-jit \
+--with-sha1=/usr/include/openssl \
+--with-md5=/usr/include/openssl \
+--with-mail \
+--with-mail_ssl_module \
+--with-http_stub_status_module \
+--with-http_ssl_module \
+--with-http_secure_link_module \
+--with-http_realip_module \
+--with-http_auth_request_module \
+--with-http_perl_module \
+-j2
+
+make -j2
+
+#create deb by using command 
+#if other command used than make install simply use:  checkinstall make "command"
+#choose option 10 to add deb dependencies separated by commas an without spaces, modify any other necessary info
+checkinstall
+
+#extract deb and add control files and any necessary files
+#extract debian and modify it
+mkdir ngx/
+dpkg --extract ngx-openresty_${VERSION}-1_amd64.deb ngx/
+dpkg --control ngx-openresty_${VERSION}-1_amd64.deb ngx/DEBIAN
+
+mkdir -p ngx/var/lib/nginx
+mkdir -p ngx/var/log/nginx
+chmod 755 -R ngx/var/log
+
+#add upstart script
+mkdir -p ngx/etc/init
+cat > ngx/etc/init/nginx.conf <<EOF
+# nginx upstart script
+
+description "nginx http daemon"
+author "George Shammas <georgyo@gmail.com>"
+
+start on (filesystem and net-device-up IFACE=lo)
+stop on runlevel [!2345]
+
+env DAEMON=/usr/sbin/nginx
+env PID=/var/run/nginx.pid
+
+expect fork
+respawn
+respawn limit 10 5
+#oom never
+
+pre-start script
+    \$DAEMON -t
+    if [ \$? -ne 0 ]
+        then stop; exit 0
+    fi
+end script
+
+exec \$DAEMON
+EOF
+
+cat > ngx/DEBIAN/preinst <<EOF
+#!/bin/bash
+# creating nginx group if it does not exist
+if ! getent group nginx >/dev/null; then
+    addgroup --system nginx >/dev/null
+fi
+
+# creating nginx user if it does not exist
+if ! getent passwd nginx >/dev/null; then
+    adduser \
+    --system \
+    --disabled-login \
+    --ingroup nginx \
+    --no-create-home \
+    --home /nonexistent \
+    --gecos "nginx user" \
+    --shell /bin/false \
+    nginx >/dev/null
+fi
+EOF
+ 
+cat > ngx/DEBIAN/postinst <<EOF
+#!/bin/bash
+ldconfig /usr/local/openresty/luajit/lib;
+EOF
+
+cat > ngx/DEBIAN/prerm <<EOF
+#!/bin/bash
+stop nginx &>/dev/null
+exit 0
+EOF
+
+cat > ngx/DEBIAN/postrm <<EOF
+#!/bin/bash
+
+#if nginx user exists, remove it.
+getent passwd nginx &>/dev/null
+if [[ \$? -eq 0 ]]; then
+    userdel nginx;
+fi
+
+#if nginx group exists, remove it.
+getent group nginx &>/dev/null
+if [[ \$? -eq 0 ]]; then
+    groupdel nginx;
+fi
+EOF
+
+chmod 755 ngx/DEBIAN/p*
+
+#build package
+dpkg -b ngx/ ngx-openresty_${VERSION}-1_amd64.deb
+
+#check installed packages
+#2>&1 nginx -V | tr ' '  '\n'
