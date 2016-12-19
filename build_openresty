@@ -1,15 +1,32 @@
-#bismillah
+#!/bin/bash
 
-VERSION=1.7.7.2
-# for --with-http_perl_module nginx deb package requires: libpcre3, libossp-uuid-perl, libossp-uuid16
-#install dependencies and compiling tools
-apt-get update
-apt-get -y install libreadline-dev libncurses5-dev libpcre3-dev libssl-dev perl make checkinstall
+function usage
+{
+    echo "usage: build_openresty [[[-ov string:openresty_version ] [-i]] | [-h]]"
+}
+
+##### Main
+
+VERSION="1.9.15.1"
+while [ "$1" != "" ]; do
+    case $1 in
+        -ov | --openresty-version )     shift
+                                        VERSION=$1
+                                        ;;
+        -h | --help )                   usage
+                                        exit
+                                        ;;
+        * )                             usage
+                                        exit 1
+    esac
+    shift
+done
 
 #download tarball and extract content
 wget http://openresty.org/download/ngx_openresty-$VERSION.tar.gz
+FOLDER_NAME=`tar -ztf ngx_openresty-$VERSION.tar.gz | head -1 | cut -f1 -d"/"`
 tar -xzf ngx_openresty-$VERSION.tar.gz
-cd ngx_openresty-$VERSION
+cd $FOLDER_NAME
 
 #configure and then make
 ./configure \
@@ -43,18 +60,28 @@ make -j2
 
 #create deb by using command 
 #if other command used than make install simply use:  checkinstall make "command"
+# install=no disable created package installation
 #choose option 10 to add deb dependencies separated by commas an without spaces, modify any other necessary info
-checkinstall
+# for --with-http_perl_module nginx deb package requires: libpcre3, libossp-uuid-perl, libossp-uuid16
+checkinstall --install=no
+
+#clean filesystem after checkinstall command
+rm -r /usr/local/openresty/
 
 #extract deb and add control files and any necessary files
 #extract debian and modify it
 mkdir ngx/
-dpkg --extract ngx-openresty_${VERSION}-1_amd64.deb ngx/
-dpkg --control ngx-openresty_${VERSION}-1_amd64.deb ngx/DEBIAN
+dpkg --extract openresty_${VERSION}-1_amd64.deb ngx/
+dpkg --control openresty_${VERSION}-1_amd64.deb ngx/DEBIAN
+
+
+mv ngx/etc/nginx/nginx.conf{.default,}
+
 
 mkdir -p ngx/var/lib/nginx
 mkdir -p ngx/var/log/nginx
 chmod 755 -R ngx/var/log
+
 
 #add upstart script
 mkdir -p ngx/etc/init
